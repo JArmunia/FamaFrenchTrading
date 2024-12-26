@@ -5,20 +5,32 @@ import pandas_datareader.data as web
 from statsmodels.regression.rolling import RollingOLS
 import statsmodels.api as sm
 import numpy as np
-import os
 import dotenv
 import yfinance as yf
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 
-from fred_client import FREDClient
 
 dotenv.load_dotenv(".env.local")
 
 idx = pd.IndexSlice
 
-normaliza = True  # normalizamos por volatilidad
-neutraliza = False  # normalizado cross sectional media y vola
+normaliza = False  # normalizamos por volatilidad
+neutraliza = True  # normalizado cross sectional media y vola
 
-DATA_STORE = "data/assets.h5"
+if normaliza and neutraliza:
+    raise ValueError("No se puede normalizar y neutralizar al mismo tiempo")
+
+if not normaliza and not neutraliza:
+    raise ValueError("Debe normalizar o neutralizar al menos una vez")
+
+
+if normaliza:
+    DATA_STORE = "data/assets.h5"
+
+if neutraliza:
+    DATA_STORE = "data/assets_neutralized.h5"
+
 START = 2000
 END = 2025
 
@@ -39,86 +51,84 @@ TICKER_LIST = [
 FACTORS = ["Mkt-RF", "SMB", "HML", "RMW", "CMA"]
 
 INDICATORS = [
-        "JHDUSRGDPBR",
-        "T10Y3M",
-        "BAMLC0A0CM",
-        "BAMLH0A0HYM2",
-        "BAMLHE00EHYIOAS",
-        "UMCSENT",
-        "UNRATE",
-        "GDPC1",
-        "DCOILWTICO",
-        "CORESTICKM159SFRBATL",
-        "USSLIND",
-        "VIXCLS",
-        "ICSA",
-        "MARTSMPCSM44000USS",
-        "RSXFS",
-        "DGS1",
-        ##########################
-        "TOTBKCR",
-        "BUSLOANS",
-        "WPU08",
-        "PCOTTINDUSDM",
-        "PWHEAMTUSDM",
-        "PMAIZMTUSDM",
-        "PCOFFOTMUSDM",
-        "PNRGINDEXM",
-        "PCOPPUSDM",
-        "PNGASEUUSDM",
-        "BUSINV",
-        "CP",
-        "PCU33443344",
-        "CPIAUCSL",
-        "M2SL",
-        "REAINTRATREARAT10Y",
-        "HOUST",
-        "CUSR0000SERA02",
-        "IP7108",
-    ]  # ,'OVXCLS'
+    "JHDUSRGDPBR",
+    "T10Y3M",
+    "BAMLC0A0CM",
+    "BAMLH0A0HYM2",
+    "BAMLHE00EHYIOAS",
+    "UMCSENT",
+    "UNRATE",
+    "GDPC1",
+    "DCOILWTICO",
+    "CORESTICKM159SFRBATL",
+    "USSLIND",
+    "VIXCLS",
+    "ICSA",
+    "MARTSMPCSM44000USS",
+    "RSXFS",
+    "DGS1",
+    ##########################
+    "TOTBKCR",
+    "BUSLOANS",
+    "WPU08",
+    "PCOTTINDUSDM",
+    "PWHEAMTUSDM",
+    "PMAIZMTUSDM",
+    "PCOFFOTMUSDM",
+    "PNRGINDEXM",
+    "PCOPPUSDM",
+    "PNGASEUUSDM",
+    "BUSINV",
+    "CP",
+    "PCU33443344",
+    "CPIAUCSL",
+    "M2SL",
+    "REAINTRATREARAT10Y",
+    "HOUST",
+    "CUSR0000SERA02",
+    "IP7108",
+]  # ,'OVXCLS'
 INDICATOR_NAMES = [
-        "recession",
-        "yield_curve",
-        "corp_oas",
-        "hy_oas",
-        "eu_hy_oas",
-        "sentiment",
-        "empleo",
-        "real_gdp",
-        "oil",
-        "inflacion",
-        "leading",
-        "vix",
-        "weekjobclaims",
-        "retail_sales_percent",
-        "retail_sales",
-        "1y_yield",
-        #####################
-        "tot_bank_credit",
-        "commercial_industrial_loans",
-        "lumber",
-        "cotton",
-        "wheat",
-        "corn",
-        "coffee",
-        "energy_price",
-        "copper",
-        "natural_gas",
-        "business_inventory",
-        "corporate_profits",
-        "semiconductor_electronics_manufacturing",
-        "consumer_price_index",
-        "M2_money_supply",
-        "10y_real_interest_rate",
-        "new_homes",
-        "streaming_media_consumption",
-        "gold",
-    ]  # ,'vixoil'
-
+    "recession",
+    "yield_curve",
+    "corp_oas",
+    "hy_oas",
+    "eu_hy_oas",
+    "sentiment",
+    "empleo",
+    "real_gdp",
+    "oil",
+    "inflacion",
+    "leading",
+    "vix",
+    "weekjobclaims",
+    "retail_sales_percent",
+    "retail_sales",
+    "1y_yield",
+    #####################
+    "tot_bank_credit",
+    "commercial_industrial_loans",
+    "lumber",
+    "cotton",
+    "wheat",
+    "corn",
+    "coffee",
+    "energy_price",
+    "copper",
+    "natural_gas",
+    "business_inventory",
+    "corporate_profits",
+    "semiconductor_electronics_manufacturing",
+    "consumer_price_index",
+    "M2_money_supply",
+    "10y_real_interest_rate",
+    "new_homes",
+    "streaming_media_consumption",
+    "gold",
+]  # ,'vixoil'
 
 
 def repair_VOX(data):
-
     # Descargamos QQQ para reemplazar VOX antes de 2004-09-28
     qqq = yf.download(
         tickers=["QQQ"],
@@ -152,7 +162,6 @@ def repair_IYR(data):
 
 
 def download_data(ticker_list):
-
     data = yf.download(
         # passes the ticker
         tickers=ticker_list,
@@ -193,6 +202,7 @@ def create_weekly_returns(prices, start, end, column="close", lags=None):
 
     prices = prices.loc[idx[:, str(start) : str(end)], column].unstack("ticker")
     weekly_prices = prices.resample("W").last()
+    weekly_prices_real = prices.resample("W").last().stack().swaplevel().dropna().copy()
     outlier_cutoff = 0.01
     data = pd.DataFrame()
     for lag in lags:
@@ -210,7 +220,7 @@ def create_weekly_returns(prices, start, end, column="close", lags=None):
             .sub(1)
         )
     data = data.swaplevel().dropna()
-    return data
+    return data, weekly_prices_real
 
 
 def drop_stocks_with_less_than_n_years_of_returns(returns, n_years=10):
@@ -236,9 +246,9 @@ def normalize(data, lags=None):
         return series / series.rolling(52).std().shift(1)
 
     for lag in lags:
-        data[f"return_{lag}w"] = data.groupby(level="ticker")[f"return_{lag}w"].transform(
-            _normalize_by_rolling_std
-        )
+        data[f"return_{lag}w"] = data.groupby(level="ticker")[
+            f"return_{lag}w"
+        ].transform(_normalize_by_rolling_std)
     return data
 
 
@@ -250,7 +260,7 @@ def neutralize(data, lags=None):
         return (group - group.mean()) / group.std()
 
     for lag in lags:
-        data[f"return_{lag}w"] = data.groupby(level="date")[f"return_{lag}m"].transform(
+        data[f"return_{lag}w"] = data.groupby(level="date")[f"return_{lag}w"].transform(
             _neutralize
         )
     return data
@@ -325,7 +335,6 @@ def add_targets(data, weeks=None):
 
 
 def add_fred_data(data):
-
     data_fred = (
         web.DataReader(INDICATORS, "fred", START, END + 1)
         .ffill()
@@ -340,7 +349,12 @@ def add_fred_data(data):
         data_fred[columna + "_diff"] = data_fred[columna].diff()
 
     # eliminamos algunas variables que tienen mucha dependencia del nivel historico
-    data_fred = data_fred.drop(["empleo",], axis=1)
+    data_fred = data_fred.drop(
+        [
+            "empleo",
+        ],
+        axis=1,
+    )
     data = data.join(data_fred)
     return data
 
@@ -348,21 +362,23 @@ def add_fred_data(data):
 def main():
     prices = download_data(TICKER_LIST)
     save_data(prices, "data_close")
-    weekly_returns = create_weekly_returns(prices, START, END)
+    weekly_returns, return_1w_real = create_weekly_returns(prices, START, END)
 
     # save_data(weekly_returns, "data_close")
 
     weekly_returns = drop_stocks_with_less_than_n_years_of_returns(weekly_returns, 10)
 
     save_data(weekly_returns, "data_raw")
+    # weekly_returns = weekly_returns.return_1w.copy()
 
     if normaliza:
         weekly_returns = normalize(weekly_returns)
 
     if neutraliza:
+
         weekly_returns = neutralize(weekly_returns)
 
-    factor_betas = get_factor_betas(weekly_returns)
+    factor_betas = get_factor_betas(return_1w_real.to_frame("return_1w"))
 
     weekly_returns = weekly_returns.join(factor_betas.groupby(level="ticker").shift())
 
@@ -379,10 +395,6 @@ def main():
     weekly_returns = add_fred_data(weekly_returns)
 
     save_data(weekly_returns, "engineered_features")
-
-    # Realizamos PCA manteniendo 95% de la varianza
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.decomposition import PCA
 
     # Excluimos todos los targets
     features = weekly_returns.select_dtypes(include=["float64", "int64"]).drop(
