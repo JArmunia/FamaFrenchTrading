@@ -1,3 +1,5 @@
+import warnings
+warnings.filterwarnings('ignore')
 import pandas as pd
 import pandas_datareader.data as web
 
@@ -11,12 +13,14 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 
 
+
+
 dotenv.load_dotenv(".env.local")
 
 idx = pd.IndexSlice
 
-normaliza = False  # normalizamos por volatilidad
-neutraliza = True  # normalizado cross sectional media y vola
+normaliza = True  # normalizamos por volatilidad
+neutraliza = False  # normalizado cross sectional media y vola
 
 if normaliza and neutraliza:
     raise ValueError("No se puede normalizar y neutralizar al mismo tiempo")
@@ -26,10 +30,10 @@ if not normaliza and not neutraliza:
 
 
 if normaliza:
-    DATA_STORE = "data/assets.h5"
+    DATA_STORE = "data_normalized/assets.h5"
 
 if neutraliza:
-    DATA_STORE = "data/assets_neutralized.h5"
+    DATA_STORE = "data_neutralized/assets.h5"
 
 START = 2000
 END = 2025
@@ -358,18 +362,36 @@ def add_fred_data(data):
     data = data.join(data_fred)
     return data
 
+def eliminar_correlaciones(df, umbral=0.95):
+    # Matriz de correlación
+    corr_matrix = df.corr().abs()
+    
+    # Encuentra pares de columnas correlacionadas
+    pares_correlacionados = []
+    for i in range(len(corr_matrix.columns)):
+        for j in range(i+1, len(corr_matrix.columns)):
+            if corr_matrix.iloc[i,j] > umbral:
+                col1 = corr_matrix.columns[i]
+                col2 = corr_matrix.columns[j]
+                pares_correlacionados.append((col1, col2, corr_matrix.iloc[i,j]))
+
+    # Decide qué columnas eliminar
+    columnas_eliminar = set()
+    for col1, col2, _ in pares_correlacionados:
+        # Elimina la segunda columna de cada par
+        columnas_eliminar.add(col2)
+    
+    return df.drop(columns=list(columnas_eliminar)), list(columnas_eliminar)
+
 
 def main():
     prices = download_data(TICKER_LIST)
     save_data(prices, "data_close")
     weekly_returns, return_1w_real = create_weekly_returns(prices, START, END)
 
-    # save_data(weekly_returns, "data_close")
-
     weekly_returns = drop_stocks_with_less_than_n_years_of_returns(weekly_returns, 10)
 
     save_data(weekly_returns, "data_raw")
-    # weekly_returns = weekly_returns.return_1w.copy()
 
     if normaliza:
         weekly_returns = normalize(weekly_returns)
@@ -393,8 +415,10 @@ def main():
     weekly_returns = add_lagged_returns(weekly_returns)
     weekly_returns = add_targets(weekly_returns)
     weekly_returns = add_fred_data(weekly_returns)
+    weekly_returns = weekly_returns.drop(columns=["target_2w","target_3w","target_6w","target_12w"])
 
     save_data(weekly_returns, "engineered_features")
+
 
     # Excluimos todos los targets
     features = weekly_returns.select_dtypes(include=["float64", "int64"]).drop(
@@ -410,7 +434,7 @@ def main():
     features_scaled = scaler.transform(features)
 
     # Aplicamos PCA usando solo datos hasta 2020
-    pca = PCA(n_components=0.99)  # Mantener 95% de la varianza
+    pca = PCA(n_components=50)  # Usamos 50 componentes principales
     # Primero imputamos con el valor anterior
     features_scaled_train = pd.DataFrame(features_scaled[mask_2020]).fillna(
         method="ffill"
@@ -418,6 +442,11 @@ def main():
     # Si quedan nulos, imputamos con la media
     features_scaled_train = features_scaled_train.fillna(features_scaled_train.mean())
     pca.fit(features_scaled_train)
+    
+    # Imprimimos la varianza explicada
+    varianza_explicada = pca.explained_variance_ratio_.cumsum()
+    print(f"\nVarianza explicada acumulada con 50 componentes: {varianza_explicada[-1]:.2%}")
+    
     # Transformamos todos los datos con el PCA entrenado
     features_scaled = np.nan_to_num(
         features_scaled, nan=np.nanmean(features_scaled[mask_2020])
@@ -433,6 +462,16 @@ def main():
 
     # Guardamos el resultado
     save_data(features_pca_df, "engineered_features_pca")
+
+    # Reducimos el numero de features para que no haya tantas correlaciones
+    columnas_conservar = ['return_1w', 'sector', 'target_1w', ]
+    data_num = weekly_returns.drop(columns=columnas_conservar)
+    data_conservar = weekly_returns.loc[:, columnas_conservar]
+    # Uso:
+    df_limpio, eliminadas = eliminar_correlaciones(data_num, umbral=0.6)
+
+    df_concatenado = pd.concat([data_conservar, df_limpio], axis=1)
+    save_data(df_concatenado, 'engineered_features_trimmed')
 
     print(features_pca_df.tail())
     print(features_pca_df.info())

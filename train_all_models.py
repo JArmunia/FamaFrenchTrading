@@ -1,29 +1,82 @@
 import subprocess
 from pathlib import Path
+from time import time
 
-# Definir argumentos comunes
-data_store = Path("data/assets_neutralized.h5")
-data_store_item = "engineered_features_trimmed"
-results_path = Path("results/us_stocks")
-predictions_store = Path("data/prueba_predictions.h5")
 
-# Ejecutar model_training.py
-print("\nEjecutando model_training.py...")
-subprocess.run([
-    "python", 
-    "model_training.py",
-    "--data_store", str(data_store),
-    "--data_store_item", data_store_item,
-    "--results_path", str(results_path)
-])
+
+def ejecutar_model_training(data_store, data_store_item, results_path):    
+    print(f"\nEjecutando model_training.py con data_store_item={data_store_item} y results_path={results_path}...")
+    subprocess.run([
+        "python", 
+        "model_training.py",
+        "--data_store", str(data_store),
+        "--data_store_item", data_store_item,
+        "--results_path", str(results_path)
+    ])
 
 # Ejecutar predict_OOS.py
-print("\nEjecutando predict_OOS.py...")
-subprocess.run([
-    "python",
-    "predict_OOS.py", 
-    "--data_store", str(data_store),
-    "--data_store_item", data_store_item,
-    "--results_path", str(results_path),
-    "--predictions_store", str(predictions_store)
-])
+def ejecutar_predict_oos(data_store, data_store_item, results_path, predictions_store):
+    print(f"\nEjecutando predict_OOS.py con data_store_item={data_store_item}, results_path={results_path} y predictions_store={predictions_store}...")
+    subprocess.run([
+        "python",
+        "predict_OOS.py", 
+        "--data_store", str(data_store),
+        "--data_store_item", data_store_item,
+        "--results_path", str(results_path),
+        "--predictions_store", str(predictions_store)
+    ])
+
+
+if __name__ == "__main__":
+    
+    data_store = Path("data/assets_neutralized.h5")
+    data_store_item = "engineered_features_trimmed"
+    results_path = Path("results_prueba/us_stocks")
+    predictions_store = Path("data/prueba_predictions.h5")
+
+
+    modelos = [{
+        "data_store":"data_neutralized/assets.h5",
+        "data_store_item":"engineered_features",
+        "results_path":"results_neutralized_todo/us_stocks",
+        "predictions_store":"data/predictions_neutralized_todo.h5"
+    },
+    {
+        "data_store":"data_normalized/assets.h5",
+        "data_store_item":"engineered_features",
+        "results_path":"results_normalized_todo/us_stocks",
+        "predictions_store":"data/predictions_normalized_todo.h5"
+    },
+    {
+        "data_store":"data_neutralized/assets.h5",
+        "data_store_item":"engineered_features_trimmed",
+        "results_path":"results_neutralized_trimmed/us_stocks",
+        "predictions_store":"data/predictions_neutralized_trimmed.h5"
+    },
+    {
+        "data_store":"data_normalized/assets.h5",
+        "data_store_item":"engineered_features_trimmed",
+        "results_path":"results_normalized_trimmed/us_stocks",
+        "predictions_store":"data/predictions_normalized_trimmed.h5"
+    },
+    {
+        "data_store":"data_neutralized/assets.h5",
+        "data_store_item":"engineered_features_pca",
+        "results_path":"results_neutralized_pca/us_stocks",
+        "predictions_store":"data/predictions_neutralized_pca.h5"
+    },
+    {
+        "data_store":"data_normalized/assets.h5",
+        "data_store_item":"engineered_features_pca",
+        "results_path":"results_normalized_pca/us_stocks",
+        "predictions_store":"data/predictions_normalized_pca.h5"
+    }
+    ]
+
+    for modelo in modelos:
+        time_start = time()
+        print("*"*100)
+        print(f"\nEjecutando modelo {modelo['data_store_item']}...")
+        ejecutar_model_training(modelo["data_store"], modelo["data_store_item"], modelo["results_path"])
+        ejecutar_predict_oos(modelo["data_store"], modelo["data_store_item"], modelo["results_path"], modelo["predictions_store"])
+        print("*"*45, f"Tiempo transcurrido: {time() - time_start:.2f} segundos", "*"*45)
