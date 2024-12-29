@@ -458,6 +458,7 @@ def main():
     features_pca_df = pd.DataFrame(features_pca, index=features.index, columns=pca_cols)
 
     # Añadimos el target original
+    features_pca_df["sector"] = weekly_returns["sector"]
     features_pca_df["target_1w"] = weekly_returns["target_1w"]
 
     # Guardamos el resultado
